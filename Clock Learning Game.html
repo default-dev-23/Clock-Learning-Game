@@ -1,0 +1,1264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clock Learning Game</title> <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom styles (Combined from previous versions) */
+        body { font-family: 'Inter', sans-serif; overscroll-behavior: none; }
+        #gameContainer { position: relative; overflow: hidden; }
+
+        /* Feedback Overlay & Animation */
+        #feedbackOverlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0; border-radius: inherit; }
+        .feedback-overlay-correct { background-color: rgba(74, 222, 128, 0.5); }
+        .feedback-overlay-incorrect { background-color: rgba(248, 113, 113, 0.5); }
+        @keyframes radial-spread { from { clip-path: circle(0% at var(--click-x) var(--click-y)); opacity: 1; } to { clip-path: circle(150% at var(--click-x) var(--click-y)); opacity: 0; } }
+        .animate-spread { animation: radial-spread 1.8s ease-out 1; } /* Duration defined in constants */
+
+        /* Glow & Score Animations */
+        @keyframes pulse-glow { 0%, 100% { box-shadow: 0 6px 15px rgba(0,0,0,0.15), 0 4px 6px rgba(0,0,0,0.1), 0 0 20px 7px rgba(59, 130, 246, 0.5); } 50% { box-shadow: 0 6px 15px rgba(0,0,0,0.15), 0 4px 6px rgba(0,0,0,0.1), 0 0 30px 12px rgba(59, 130, 246, 0.7); } }
+        @keyframes score-pop { 0%, 100% { transform: scale(1); color: inherit; } 50% { transform: scale(1.25); color: #10b981; } }
+        .score-updated { display: inline-block; animation: score-pop 0.4s ease-out 1; } /* Duration defined in constants */
+        @keyframes pulse-lite { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+        .perfect-score-animation { animation: pulse-lite 1.5s ease-in-out infinite; }
+
+        /* Clock styles */
+        .clock-container { width: 300px; height: 300px; position: relative; border-radius: 50%; background-color: #f3f4f6; border: 8px solid #4b5563; transition: box-shadow 0.3s ease-in-out, border-color 0.3s ease-in-out; box-shadow: 0 6px 15px rgba(0,0,0,0.15), 0 4px 6px rgba(0,0,0,0.1); margin: 20px auto; user-select: none; flex-shrink: 0; overflow: hidden; }
+        .clock-interactive { animation: pulse-glow 1.8s ease-in-out infinite; box-shadow: 0 6px 15px rgba(0,0,0,0.15), 0 4px 6px rgba(0,0,0,0.1), 0 0 20px 7px rgba(59, 130, 246, 0.5); }
+        .clock-face { width: 100%; height: 100%; position: relative; }
+
+        /* SVG Styles */
+        #clockSvg { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
+        .clock-mark { stroke: #4b5563; stroke-linecap: round; }
+        .hour-mark { stroke-width: 2.5; stroke: #1f2937; }
+        .minute-mark { stroke-width: 1; }
+        .hour-number { fill: #1f2937; font-size: 16px; font-family: 'Inter', sans-serif; font-weight: 600; text-anchor: middle; dominant-baseline: middle; }
+
+        /* Hands */
+        .hand { position: absolute; bottom: 50%; left: 50%; transform-origin: bottom center; background-color: #1f2937; border-radius: 3px; z-index: 10; transform: translateX(-50%) rotate(0deg); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6); }
+        .hour-hand { width: 8px; height: 28%; background-color: #2563eb; }
+        .minute-hand { width: 5px; height: 40%; }
+        .correct-hand { position: absolute; bottom: 50%; left: 50%; transform-origin: bottom center; background-color: #22c55e; border: 1px solid rgba(0,0,0,0.2); border-radius: 3px; z-index: 11; transform: translateX(-50%) rotate(0deg); display: none; box-shadow: 0 0 3px rgba(0,0,0,0.3); }
+        #correctHourHand { width: 8px; height: 28%; }
+        #correctMinuteHand { width: 5px; height: 40%; }
+
+        /* Hit Areas */
+        .hit-area { position: absolute; bottom: 50%; left: 50%; width: 30px; height: 45%; transform-origin: bottom center; z-index: 20; pointer-events: none; transform: translateX(-50%) rotate(0deg); background-color: transparent; }
+        .hit-area.active { pointer-events: auto; cursor: move; }
+        #hourHitArea { height: 35%; }
+        #minuteHitArea { height: 45%; }
+
+        /* Center Dot */
+        .center-dot { position: absolute; top: 50%; left: 50%; width: 14px; height: 14px; background-color: #ef4444; border: 2px solid #ffffff; border-radius: 50%; transform: translate(-50%, -50%); z-index: 25; }
+
+        /* AM/PM Indicator */
+        #amPmIndicator { text-align: center; margin-top: 5px; margin-bottom: 5px; line-height: 1.2; min-height: 2.5em; }
+        #amPmAbbr { font-size: 1.1rem; font-weight: 700; color: #374151; }
+        #amPmDesc { display: block; font-size: 0.75rem; color: #6b7280; }
+
+        /* Input styling */
+        input[type="text"], input[type="number"] { border: 1px solid #d1d5db; padding: 8px 12px; border-radius: 6px; margin: 0 5px; transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out, background-color 0.2s ease-in-out, opacity 0.2s ease-in-out; }
+        input:hover { border-color: #9ca3af; }
+        input:focus { outline: none; border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.3); }
+        input.no-digits::-webkit-inner-spin-button, input.no-digits::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input.no-digits[type=number] { -moz-appearance: textfield; }
+        input:disabled { background-color: #f3f4f6; opacity: 0.7; cursor: not-allowed; }
+
+        /* Past/To Toggle Button Styles */
+        #pastToToggle { display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid #d1d5db; margin: 0 5px; }
+        #pastToToggle button { padding: 8px 12px; border: none; cursor: pointer; transition: background-color 0.2s ease, color 0.2s ease; font-size: 0.875rem; font-weight: 500; }
+        #pastToToggle button.active { background-color: #3b82f6; color: white; }
+        #pastToToggle button:not(.active) { background-color: white; color: #4b5563; }
+        #pastToToggle button:not(.active):hover { background-color: #f3f4f6; }
+        #pastToToggle button:focus { outline: none; box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.3); z-index: 1; }
+        #pastToToggle button:disabled { background-color: #f3f4f6 !important; color: #9ca3af !important; opacity: 0.7; cursor: not-allowed; }
+
+        /* Button styling */
+        button.btn-primary, button.btn-secondary { border-radius: 8px; font-weight: 600; cursor: pointer; transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.1s ease; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 5px; padding: 0.75rem 1.5rem; /* Standardized padding */ }
+        button.btn-primary:hover, button.btn-secondary:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.15); transform: translateY(-1px); }
+        button.btn-primary:active, button.btn-secondary:active { transform: scale(0.98); box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+        .btn-primary { background-color: #3b82f6; color: white; }
+        .btn-primary:hover { background-color: #2563eb; }
+        .btn-primary:active { background-color: #1d4ed8; }
+        .btn-secondary { background-color: #6b7280; color: white; }
+        .btn-secondary:hover { background-color: #4b5563; }
+        .btn-secondary:active { background-color: #374151; }
+        button:disabled { background-color: #d1d5db !important; color: #6b7280 !important; cursor: not-allowed; transform: none; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+
+
+        /* Feedback Area */
+        .feedback { min-height: 60px; margin-top: 15px; font-weight: 600; text-align: center; line-height: 1.4; }
+        .feedback-correct { color: #10b981; }
+        .feedback-incorrect { color: #ef4444; }
+        .feedback-partial { color: #f59e0b; }
+        .correct-answer-feedback { display: block; margin-top: 8px; font-weight: normal; color: #10b981; }
+        .correct-answer-feedback strong { font-weight: 600; color: #059669; }
+
+        /* Scoreboard */
+        .scoreboard { font-size: 1.1rem; font-weight: 600; text-align: center; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+        #scoreValue { display: inline-block; }
+        #scorePercent { margin-left: 0.5rem; font-weight: 700; }
+        #timerDisplay { font-size: 0.9rem; color: #6b7280; font-weight: 400; margin-right: 1rem; }
+        #timerDisplay svg { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; margin-right: 0.2em; }
+        .score-red { color: #ef4444; }
+        .score-yellow { color: #f59e0b; }
+        .score-green { color: #10b981; }
+        .score-perfect { color: #10b981; }
+
+        /* Input Sections */
+        .input-section { display: none; margin-top: 15px; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; padding: 15px; border-radius: 8px; background-color: #f9fafb; border: 1px solid #e5e7eb; box-shadow: inset 0 1px 3px rgba(0,0,0,0.06); position: relative; }
+        .input-section.visible { display: flex; }
+        .input-section-label { font-weight: 600; margin-bottom: 10px; width: 100%; text-align: center; color: #4b5563; }
+        #standardWordInputContainer, #fullWordInputContainer { display: none; width: 100%; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px;}
+        #standardWordInputContainer.visible, #fullWordInputContainer.visible { display: flex; }
+
+        /* Spelling Helper Icon */
+        #spellingHelperIcon { display: none; position: absolute; top: 10px; right: 10px; cursor: pointer; color: #6b7280; padding: 5px; }
+        #spellingHelperIcon:hover { color: #3b82f6; }
+        #spellingHelperIcon svg { width: 20px; height: 20px; display: block; }
+
+        /* Spelling Helper Overlay */
+        #spellingOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); z-index: 1000; justify-content: center; align-items: center; }
+        /* This class name MUST match the VISIBLE_CLASS constant in JS */
+        #spellingOverlay.overlay-visible { display: flex; }
+        .overlay-content { background-color: white; padding: 25px; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); max-width: 90%; width: 450px; max-height: 80vh; overflow-y: auto; position: relative; }
+        .overlay-content h3 { font-size: 1.25rem; font-weight: 600; margin-bottom: 15px; text-align: center; }
+        #closeSpellingOverlay { position: absolute; top: 10px; right: 10px; background: none; border: none; font-size: 1.5rem; line-height: 1; cursor: pointer; color: #6b7280; padding: 5px; }
+        #closeSpellingOverlay:hover { color: #1f2937; }
+        #spellingList { column-count: 2; column-gap: 25px; font-size: 0.95rem; margin-bottom: 10px; }
+        .spelling-entry { display: grid; grid-template-columns: 40px 1fr; gap: 10px; padding: 4px 0; break-inside: avoid-column; }
+        .spelling-entry-num { font-weight: 600; text-align: right; color: #4b5563; }
+        .spelling-entry-word { font-family: monospace; color: #1f2937; text-align: left; }
+        .spelling-entry-word.spelling-special { font-weight: 700; color: #2563eb; }
+
+        /* Prompt Display Area */
+        #promptDisplayArea { display: none; flex-direction: row; justify-content: center; align-items: baseline; gap: 0.5rem; font-size: 1.2rem; font-weight: bold; color: #1f2937; margin: 15px 0; padding: 10px; background-color: #e0f2fe; border-radius: 8px; min-height: 2.5em; }
+        #promptDisplayArea.visible { display: flex; }
+        #promptAmPmIndicator { font-size: 0.9rem; font-weight: 500; color: #4b5563; }
+
+        /* Reintroduced Mistake Indicator */
+        #reintroducedIndicator { display: none; text-align: center; font-size: 0.8rem; font-weight: 600; color: #ea580c; margin-top: 0; margin-bottom: 15px; }
+        #reintroducedIndicator svg { display: inline-block; width: 1em; height: 1em; margin-right: 0.25em; vertical-align: -0.125em; }
+
+        /* Layout adjustments */
+        #gameWrapper { display: flex; flex-direction: column; align-items: center; width: 100%; }
+        @media (min-width: 768px) { /* Apply row layout on medium screens and up */
+            #gameWrapper { flex-direction: row; align-items: flex-start; justify-content: center; gap: 2rem; }
+            #clockAreaWrapper { margin: 0; display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+            #controlsAreaWrapper { flex-grow: 1; max-width: 450px; display: flex; flex-direction: column; align-items: center; }
+            #instructionArea, #instructionAreaGerman, #reintroducedIndicator, #promptDisplayArea, #feedbackArea, .input-section-label, #amPmIndicator { text-align: center; width: 100%; }
+            #scoreboardArea { width: 100%; text-align: center; margin-top: 1rem; }
+            .input-section { width: 100%; }
+            .text-center { width: 100%; }
+            #buttonContainer { display: flex; justify-content: center; width: 100%; margin-top: 1.5rem; }
+        }
+         #scoreboardArea { width: 100%; text-align: center; margin-top: 1rem; }
+
+         /* Difficulty Selector Styles */
+         #difficultySelector { display: flex; justify-content: center; gap: 0.5rem; margin-bottom: 1.5rem; margin-top: 1rem; }
+         .difficulty-btn { padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 6px; font-weight: 500; cursor: pointer; transition: all 0.2s ease; background-color: white; color: #4b5563; }
+         .difficulty-btn:hover { background-color: #f3f4f6; border-color: #9ca3af; }
+         .difficulty-btn.active { color: white; border-color: transparent; }
+         .difficulty-btn.active.easy { background-color: #10b981; } /* Green */
+         .difficulty-btn.active.medium { background-color: #f59e0b; } /* Yellow */
+         .difficulty-btn.active.difficult { background-color: #ef4444; } /* Red */
+         .difficulty-btn:focus { outline: none; box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.3); z-index: 1; }
+
+         /* Confirmation Dialog Styles */
+        #confirmationOverlay { display: none; /* Hidden by default */ position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); z-index: 1500; justify-content: center; align-items: center; }
+        #confirmationOverlay.overlay-visible { display: flex; }
+        .confirmation-dialog { background-color: white; padding: 25px 30px; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.25); max-width: 90%; width: 400px; text-align: center; }
+        .confirmation-dialog p { margin-bottom: 10px; font-size: 1rem; color: #374151; }
+        .confirmation-dialog .german-text { font-size: 0.85rem; color: #6b7280; margin-bottom: 20px; }
+        .confirmation-buttons { display: flex; justify-content: center; gap: 1rem; }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div id="gameContainer" class="relative bg-white p-6 md:p-8 rounded-lg shadow-xl w-full max-w-4xl">
+        <div id="feedbackOverlay"></div>
+
+        <h1 id="appTitle" class="text-2xl md:text-3xl font-bold text-center text-gray-800 mb-2">
+            Clock Learning Game
+        </h1>
+
+        <div id="difficultySelector" class="mt-4">
+            <button class="difficulty-btn easy" data-difficulty="easy">Easy</button>
+            <button class="difficulty-btn medium" data-difficulty="medium">Medium</button>
+            <button class="difficulty-btn difficult" data-difficulty="difficult">Difficult</button>
+        </div>
+
+
+        <div id="gameWrapper">
+            <div id="clockAreaWrapper">
+                <div id="clockContainer" class="clock-container">
+                    <div class="clock-face">
+                        <svg id="clockSvg" width="100%" height="100%" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"></svg>
+                        <div class="hand hour-hand" id="hourHand"></div>
+                        <div class="hand minute-hand" id="minuteHand"></div>
+                        <div class="correct-hand" id="correctHourHand"></div>
+                        <div class="correct-hand" id="correctMinuteHand"></div>
+                        <div class="hit-area" id="hourHitArea"></div>
+                        <div class="hit-area" id="minuteHitArea"></div>
+                        <div class="center-dot" id="centerDot"></div>
+                    </div>
+                </div>
+                <div id="amPmIndicator">
+                    <span id="amPmAbbr"></span>
+                    <span id="amPmDesc"></span>
+                </div>
+                <div id="scoreboardArea" class="scoreboard text-gray-700 w-full mt-4 border border-gray-200 rounded-lg p-2 bg-gray-50 shadow-sm">
+                     <span id="timerDisplay" class="mr-4 text-sm text-gray-500 font-normal">
+                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 inline-block align-text-bottom mr-1">
+                             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                         </svg>
+                         <span id="timerValue">0s</span>
+                     </span>
+                     <span> Score: <span id="scoreValue">0</span> <span id="scorePercent" class="ml-2 font-semibold hidden"></span>
+                     </span>
+                </div>
+            </div>
+
+            <div id="controlsAreaWrapper">
+                 <div id="promptDisplayArea">
+                     <span id="promptText"></span>
+                     <span id="promptAmPmIndicator"></span>
+                 </div>
+                <div id="instructionArea" class="text-lg font-semibold text-gray-700 mt-4 mb-1 min-h-[1.5em]"></div>
+                <div id="instructionAreaGerman" class="text-sm text-gray-500 mb-1 min-h-[1.5em]"></div>
+                <div id="reintroducedIndicator">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"> <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /> </svg>
+                    <span>Previous Mistake</span>
+                </div>
+                 <div id="inputArea" class="w-full">
+                     <div id="wordInputSection" class="input-section">
+                         <span class="input-section-label" id="wordInputLabel"> Write in Words: </span>
+                         <span id="spellingHelperIcon" title="Spelling Help">
+                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"> <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" /> </svg>
+                         </span>
+                         <div id="standardWordInputContainer">
+                             <input type="text" id="minuteWordInput" size="10" placeholder="minutes" class="no-digits">
+                             <div id="pastToToggle" class="flex border border-gray-300 rounded-md overflow-hidden mx-2">
+                                 <button id="pastBtn" class="px-4 py-1 focus:outline-none transition-colors duration-200" data-value="past">past</button>
+                                 <button id="toBtn" class="px-4 py-1 focus:outline-none transition-colors duration-200" data-value="to">to</button>
+                             </div>
+                             <input type="text" id="hourWordInput" size="10" placeholder="hour" class="no-digits">
+                         </div>
+                         <div id="fullWordInputContainer"> <input type="text" id="fullWordInput" class="w-full max-w-xs no-digits" placeholder="e.g., five o'clock"> </div>
+                     </div>
+                     <div id="digitalInputSection" class="input-section"> <span class="input-section-label" id="digitalInputLabel">Write in Digital (24h):</span> <input type="number" id="hourDigitalInput" min="0" max="23" step="1" class="w-16 text-center"> <span class="text-xl font-bold mx-1">:</span> <input type="number" id="minuteDigitalInput" min="0" max="59" class="w-16 text-center"> </div>
+                 </div>
+                <div id="buttonContainer" class="text-center mt-6">
+                    <button id="checkButton" class="btn-primary">Check Answer</button>
+                    <button id="nextButton" class="btn-secondary" style="display: none;">Next Question</button>
+                </div>
+                <div id="feedbackArea" class="feedback mt-4 w-full"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="spellingOverlay">
+        <div class="overlay-content">
+            <button id="closeSpellingOverlay" title="Close">&times;</button>
+            <h3>Number Spelling</h3>
+            <div id="spellingList"></div>
+        </div>
+    </div>
+
+    <div id="confirmationOverlay">
+        <div class="confirmation-dialog">
+            <p>If you change the difficulty, your progress will be lost.</p>
+            <p class="german-text">Wenn du die Schwierigkeit änderst, verlierst du deinen Fortschritt.</p>
+            <div class="confirmation-buttons">
+                <button id="confirmChangeBtn" class="btn-primary">Confirm</button>
+                <button id="cancelChangeBtn" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // --- Constants ---
+        const SVG_NS = "http://www.w3.org/2000/svg";
+        const MAX_INCORRECT_QUEUE = 4; // Max items in spaced repetition queue
+        const FEEDBACK_ANIMATION_DURATION = 1800; // ms for radial spread
+        const SCORE_POP_DURATION = 400; // ms for score update animation
+        const MINUTE_HAND_ANGLE_TOLERANCE = 3; // degrees tolerance for minute hand check
+        // Score percentage thresholds for color coding
+        const SCORE_GREEN_THRESHOLD = 75;
+        const SCORE_YELLOW_THRESHOLD = 40;
+        // CSS Classes used in JS
+        const ACTIVE_CLASS = 'active';
+        // *** FIXED: Changed constant to match CSS rule ***
+        const VISIBLE_CLASS = 'overlay-visible'; // Class used for spelling overlay
+        const SECTION_VISIBLE_CLASS = 'visible'; // Class used for input sections etc.
+        const CLOCK_INTERACTIVE_CLASS = 'clock-interactive';
+        const FEEDBACK_SPREAD_CLASS = 'animate-spread';
+        const FEEDBACK_CORRECT_BG_CLASS = 'feedback-overlay-correct';
+        const FEEDBACK_INCORRECT_BG_CLASS = 'feedback-overlay-incorrect';
+        const FEEDBACK_TEXT_CORRECT_CLASS = 'feedback-correct';
+        const FEEDBACK_TEXT_INCORRECT_CLASS = 'feedback-incorrect';
+        const FEEDBACK_TEXT_PARTIAL_CLASS = 'feedback-partial';
+        const SCORE_UPDATED_CLASS = 'score-updated';
+        const PERFECT_SCORE_CLASS = 'perfect-score-animation';
+        const SCORE_RED_CLASS = 'score-red';
+        const SCORE_YELLOW_CLASS = 'score-yellow';
+        const SCORE_GREEN_CLASS = 'score-green';
+        const SCORE_PERFECT_CLASS = 'score-perfect';
+        const DIFFICULTY_CLASSES = ['easy', 'medium', 'difficult']; // For removing/adding difficulty classes
+
+
+        // --- DOM Elements (Grouped) ---
+        // Game Container & Feedback
+        const gameContainer = document.getElementById('gameContainer');
+        const feedbackOverlay = document.getElementById('feedbackOverlay');
+        const feedbackArea = document.getElementById('feedbackArea');
+        // Clock Elements
+        const clockContainer = document.getElementById('clockContainer');
+        const clockFace = clockContainer.querySelector('.clock-face');
+        const clockSvg = document.getElementById('clockSvg');
+        const hourHand = document.getElementById('hourHand');
+        const minuteHand = document.getElementById('minuteHand');
+        const correctHourHand = document.getElementById('correctHourHand');
+        const correctMinuteHand = document.getElementById('correctMinuteHand');
+        const hourHitArea = document.getElementById('hourHitArea');
+        const minuteHitArea = document.getElementById('minuteHitArea');
+        const centerDot = document.getElementById('centerDot');
+        const amPmIndicator = document.getElementById('amPmIndicator');
+        const amPmAbbr = document.getElementById('amPmAbbr');
+        const amPmDesc = document.getElementById('amPmDesc');
+        // Prompt & Instructions
+        const promptDisplayArea = document.getElementById('promptDisplayArea');
+        const promptText = document.getElementById('promptText');
+        const promptAmPmIndicator = document.getElementById('promptAmPmIndicator');
+        const instructionArea = document.getElementById('instructionArea');
+        const instructionAreaGerman = document.getElementById('instructionAreaGerman');
+        const reintroducedIndicator = document.getElementById('reintroducedIndicator');
+        // Input Area Elements
+        const inputArea = document.getElementById('inputArea');
+        const wordInputSection = document.getElementById('wordInputSection');
+        const standardWordInputContainer = document.getElementById('standardWordInputContainer');
+        const fullWordInputContainer = document.getElementById('fullWordInputContainer');
+        const digitalInputSection = document.getElementById('digitalInputSection');
+        const minuteWordInput = document.getElementById('minuteWordInput');
+        const pastToToggle = document.getElementById('pastToToggle');
+        const pastBtn = document.getElementById('pastBtn');
+        const toBtn = document.getElementById('toBtn');
+        const hourWordInput = document.getElementById('hourWordInput');
+        const fullWordInput = document.getElementById('fullWordInput');
+        const hourDigitalInput = document.getElementById('hourDigitalInput');
+        const minuteDigitalInput = document.getElementById('minuteDigitalInput');
+        const wordInputLabel = document.getElementById('wordInputLabel');
+        const digitalInputLabel = document.getElementById('digitalInputLabel');
+        // Buttons
+        const checkButton = document.getElementById('checkButton');
+        const nextButton = document.getElementById('nextButton');
+        const buttonContainer = document.getElementById('buttonContainer'); // Reference for layout adjustments if needed
+        // Scoreboard & Timer
+        const scoreboardArea = document.getElementById('scoreboardArea');
+        const scoreValueElement = document.getElementById('scoreValue');
+        const scorePercentElement = document.getElementById('scorePercent');
+        const timerDisplay = document.getElementById('timerDisplay'); // Container for timer
+        const timerValueElement = document.getElementById('timerValue');
+        // Spelling Helper
+        const spellingHelperIcon = document.getElementById('spellingHelperIcon');
+        const spellingOverlay = document.getElementById('spellingOverlay');
+        const closeSpellingOverlay = document.getElementById('closeSpellingOverlay');
+        const spellingList = document.getElementById('spellingList');
+        // Difficulty Selector & Confirmation
+        const difficultySelector = document.getElementById('difficultySelector');
+        const difficultyButtons = difficultySelector.querySelectorAll('.difficulty-btn');
+        const appTitle = document.getElementById('appTitle');
+        const confirmationOverlay = document.getElementById('confirmationOverlay');
+        const confirmChangeBtn = document.getElementById('confirmChangeBtn');
+        const cancelChangeBtn = document.getElementById('cancelChangeBtn');
+
+
+        // --- Game State ---
+        let currentDifficulty = 'medium'; // Default difficulty
+        let score = 0;
+        let questionsAnswered = 0;
+        let totalPossibleScore = 0;
+        let givenFormat = 'clock'; // 'clock', 'digital', 'words'
+        let targetHour = 0, targetMinute = 0; // The correct time for the current question
+        let currentHourAngle = 0, currentMinuteAngle = 0; // Current angles set by user (if dragging)
+        let draggingHand = null; // 'hour', 'minute', or null
+        let handsAreDraggable = false; // Whether hands can be dragged in the current round
+        let currentTimeoutId = null; // For potential debouncing/throttling if needed later
+        let currentAnimationTimeout = null; // Timeout ID for feedback animation
+        let scoreUpdateTimeout = null; // Timeout ID for score pop animation class removal
+        let incorrectExercisesQueue = []; // Stores {hour, minute, format, reintroduceAfterTurn}
+        let isReintroducedExercise = false; // Flag if current question is from the queue
+        let answerSubmitted = false; // Flag to prevent multiple submissions
+        let selectedPastTo = 'past'; // State for the past/to toggle
+        let timerInterval = null; // Interval ID for the session timer
+        let elapsedTime = 0; // Elapsed time in seconds for the session
+        let pendingDifficultyChange = null; // Stores requested difficulty during confirmation
+
+
+        // --- Language Data ---
+        // Includes corrected spelling for o'clock and German imperative
+        const translations = {
+             en: { appTitle: "Clock Learning Game", instructionGivenClock: "Read the clock. Enter the digital time and time in words.", instructionGivenDigital: "Set the clock hands. Type in the time spelled out.", instructionGivenWords: "Set the clock hands. Enter the time in digital format.", inputDigital: "Digital (HH:MM)", inputWords: "Words", inputClock: "Clock Hands", and: "and", clockInputLabel: "Set the Clock:", wordInputLabel: "Write in Words:", digitalInputLabel: "Write in Digital (24h):", clockHelperText: "Drag the hour or minute hand.", checkAnswer: "Check Answer", nextQuestion: "Next Question", correct: "Correct!", incorrect: "Incorrect.", score: "Score:", feedbackSeparator: " | ", feedbackClock: "Clock", feedbackWords: "Words", feedbackDigital: "Digital", feedbackCorrect: "Correct", feedbackIncorrect: "Incorrect", correctAnswerIs: "Correct Answer:", fullWordPlaceholder: "e.g., five o'clock", am: "AM", pm: "PM", amDesc: "Morning", pmDesc: "Afternoon/Evening", midnight: "Midnight", past: "past", to: "to", oclock: "o'clock", quarter: "quarter", half: "half", minutes: "minutes", minute: "minute", numbers: { 1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve", 15: "quarter", 20: "twenty", 25: "twenty-five", 30: "half" }, minuteNumbers: { 1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen", 14: "fourteen", 15: "quarter", 16: "sixteen", 17: "seventeen", 18: "eighteen", 19: "nineteen", 20: "twenty", 21: "twenty-one", 22: "twenty-two", 23: "twenty-three", 24: "twenty-four", 25: "twenty-five", 26: "twenty-six", 27: "twenty-seven", 28: "twenty-eight", 29: "twenty-nine", 30: "half", 31: "thirty-one", 32: "thirty-two", 33: "thirty-three", 34: "thirty-four", 35: "thirty-five", 36: "thirty-six", 37: "thirty-seven", 38: "thirty-eight", 39: "thirty-nine", 40: "forty", 41: "forty-one", 42: "forty-two", 43: "forty-three", 44: "forty-four", 45: "forty-five", 46: "forty-six", 47: "forty-seven", 48: "forty-eight", 49: "forty-nine", 50: "fifty", 51: "fifty-one", 52: "fifty-two", 53: "fifty-three", 54: "fifty-four", 55: "fifty-five", 56: "fifty-six", 57: "fifty-seven", 58: "fifty-eight", 59: "fifty-nine"}, digitalHourPlaceholder: "HH", digitalMinutePlaceholder: "MM", wordMinutePlaceholder: "minutes", wordHourPlaceholder: "hour", difficultyEasy: "Easy", difficultyMedium: "Medium", difficultyDifficult: "Difficult" },
+             de: { instructionGivenClock: "Lies die Zeit von der Uhr ab. Gib die Uhrzeit digital und mit ausgeschriebenen Zahlen an.", instructionGivenDigital: "Stelle die Uhrzeiger ein. Gib die Uhrzeit mit ausgeschriebenen Zahlen an.", instructionGivenWords: "Stelle die Uhrzeiger ein. Gib die Uhrzeit digital an.", amDesc: "Am Morgen", pmDesc: "Am Abend", midnight: "Mitternacht" }
+        };
+        // Simple translation helper
+        function _(key) { return translations.en[key] || key; }
+
+
+        // --- Helper Functions ---
+
+        /** Formats a number to have at least two digits (e.g., 7 -> "07"). */
+        function formatTwoDigits(n) { return n < 10 ? '0' + n : String(n); }
+
+        /** Prevents digits from being entered into an input field. */
+        function preventDigits(event) { event.target.value = event.target.value.replace(/\d/g, ''); }
+
+        /** Normalizes compound number words (e.g., "twenty-five" -> "twentyfive"). */
+        function normalizeCompoundNumbers(text) { const regex = /(twenty|thirty|forty|fifty)[ -]?(one|two|three|four|five|six|seven|eight|nine)/gi; return text.replace(regex, (match, tens, ones) => tens + ones); }
+
+        /** Normalizes "o'clock" variations (e.g., "five o clock" -> "fiveoclock"). */
+        function normalizeOclock(text) { const oclockRegex = /(\w+)\s*'?o'?\s*clock/gi; return text.replace(oclockRegex, '$1oclock'); }
+
+        /**
+         * Checks if an angle falls within a start/end range (degrees).
+         * Handles the 360/0 degree wrap-around. End angle is exclusive.
+         * @param {number} angle - The angle to check (0-360).
+         * @param {number} start - The start angle of the range (0-360).
+         * @param {number} end - The end angle of the range (0-360).
+         * @returns {boolean} True if the angle is within the range.
+         */
+        function isAngleBetween(angle, start, end) {
+            angle = (angle + 360) % 360;
+            start = (start + 360) % 360;
+            end = (end + 360) % 360;
+            const epsilon = 0.01; // Tolerance for float comparison
+
+            if (start < end) { // Normal range (e.g., 30 to 60)
+                return angle >= (start - epsilon) && angle < (end - epsilon);
+            } else { // Range wraps around 360 (e.g., 330 to 30)
+                if (end === 0) end = 360; // Treat end 0 as 360 for comparison
+                return angle >= (start - epsilon) || angle < (end - epsilon);
+            }
+        }
+
+        /** Formats total seconds into H:MM:SS, MM:SS or Ss format. */
+        function formatTime(totalSeconds) {
+            if (totalSeconds < 0) totalSeconds = 0;
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+            if (hours > 0) { return `${hours}:${formatTwoDigits(minutes)}:${formatTwoDigits(seconds)}`; }
+            else if (minutes > 0 || totalSeconds >= 60) { return `${formatTwoDigits(minutes)}:${formatTwoDigits(seconds)}`; }
+            else { return `${seconds}s`; }
+        }
+
+
+        // --- Difficulty Specific Logic ---
+
+        /** Generates a target time based on the current difficulty level. */
+        function generateTime() {
+            targetHour = Math.floor(Math.random() * 24); // Always generate random hour
+            if (currentDifficulty === 'easy') {
+                const allowedMinutes = [0, 15, 30, 45];
+                targetMinute = allowedMinutes[Math.floor(Math.random() * allowedMinutes.length)];
+            } else if (currentDifficulty === 'medium') {
+                targetMinute = Math.floor(Math.random() * 12) * 5; // 0, 5, 10... 55
+            } else { // difficult
+                targetMinute = Math.floor(Math.random() * 60);
+                // Slightly increase chance of common times for difficult, but allow all
+                const randType = Math.random();
+                if (randType < 0.15) targetMinute = 0;
+                else if (randType < 0.30) targetMinute = 30;
+                else if (randType < 0.40) targetMinute = 15;
+                else if (randType < 0.50) targetMinute = 45;
+            }
+        }
+
+        /** Populates the spelling helper overlay based on the current difficulty. */
+        function populateSpellingHelper() {
+            spellingList.innerHTML = '';
+            const lang = translations.en;
+            let entries = [];
+
+            // Determine words needed based on difficulty
+            if (currentDifficulty === 'easy') {
+                // Hours 1-12
+                for (let i = 1; i <= 12; i++) { if (lang.numbers[i] && lang.numbers[i] !== lang.quarter && lang.numbers[i] !== lang.half) { entries.push({ num: i, word: lang.numbers[i] }); } }
+                // Quarter and half
+                if (!entries.some(e => e.word === lang.quarter)) entries.push({ num: 15, word: lang.quarter });
+                if (!entries.some(e => e.word === lang.half)) entries.push({ num: 30, word: lang.half });
+            } else if (currentDifficulty === 'medium') {
+                // Hours 1-12 (avoiding minute conflicts)
+                for (let i = 1; i <= 12; i++) { if (lang.numbers[i] && lang.numbers[i] !== lang.quarter && lang.numbers[i] !== lang.half) { if (![5, 10, 15, 20, 25, 30].includes(i)) { entries.push({ num: i, word: lang.numbers[i] }); } } }
+                // Required 5-minute interval words
+                const requiredMinutes = [5, 10, 15, 20, 25, 30];
+                requiredMinutes.forEach(num => { let word = lang.numbers[num]; if (num === 15) word = lang.quarter; if (num === 30) word = lang.half; if (num === 25) word = lang.numbers[25]; if (word && !entries.some(e => e.word === word)) { entries.push({ num: num, word: word }); } });
+                // Ensure quarter and half are present
+                if (!entries.some(e => e.word === lang.quarter)) entries.push({ num: 15, word: lang.quarter });
+                if (!entries.some(e => e.word === lang.half)) entries.push({ num: 30, word: lang.half });
+            } else { // difficult - needs relevant minute numbers up to 29 + hour numbers
+                 // Hours 1-12
+                 for (let i = 1; i <= 12; i++) { if (lang.numbers[i] && lang.numbers[i] !== lang.quarter && lang.numbers[i] !== lang.half) { entries.push({ num: i, word: lang.numbers[i] }); } }
+                 // Minutes 1-29 (excluding duplicates and quarter/half words)
+                 for (let i = 1; i <= 29; i++) {
+                     const minuteWord = lang.minuteNumbers[i];
+                     // Safer check: ensure word exists, isn't special, and isn't already added (by number or word)
+                     if (minuteWord &&
+                         minuteWord !== lang.quarter &&
+                         minuteWord !== lang.half &&
+                         !entries.some(e => e.num === i || e.word === minuteWord))
+                     {
+                          entries.push({ num: i, word: minuteWord });
+                     }
+                 }
+                 // Ensure quarter and half are added if not already present
+                 if (!entries.some(e => e.word === lang.quarter)) entries.push({ num: 15, word: lang.quarter });
+                 if (!entries.some(e => e.word === lang.half)) entries.push({ num: 30, word: lang.half });
+            }
+
+            // Sort entries numerically and add to the list
+            entries.sort((a, b) => a.num - b.num);
+            entries.forEach(entry => {
+                const entryContainer = document.createElement('div');
+                entryContainer.classList.add('spelling-entry');
+                const numDiv = document.createElement('div');
+                numDiv.classList.add('spelling-entry-num');
+                numDiv.textContent = entry.num;
+                const wordDiv = document.createElement('div');
+                wordDiv.classList.add('spelling-entry-word');
+                wordDiv.textContent = entry.word;
+                if (entry.word === lang.quarter || entry.word === lang.half) {
+                    wordDiv.classList.add('spelling-special');
+                }
+                entryContainer.appendChild(numDiv);
+                entryContainer.appendChild(wordDiv);
+                spellingList.appendChild(entryContainer);
+            });
+        }
+
+        /** Converts hour (0-23) and minute (0-59) to words (e.g., "quarter past five"). */
+        function timeToWords(h, m) {
+              const lang = translations.en;
+              const hour12 = h % 12 === 0 ? 12 : h % 12; // Hour for word display (1-12)
+              if (m === 0) return `${lang.numbers[hour12]} ${lang.oclock}`;
+              if (m === 15) return `${lang.quarter} ${lang.past} ${lang.numbers[hour12]}`;
+              if (m === 30) return `${lang.half} ${lang.past} ${lang.numbers[hour12]}`;
+              if (m === 45) {
+                  const nextHour = (h + 1) % 12 === 0 ? 12 : (h + 1) % 12;
+                  return `${lang.quarter} ${lang.to} ${lang.numbers[nextHour]}`;
+              }
+              if (m > 30) { // Minutes To
+                  const minutesTo = 60 - m;
+                  const nextHour = (h + 1) % 12 === 0 ? 12 : (h + 1) % 12;
+                  const minuteWord = lang.minuteNumbers[minutesTo] || minutesTo; // Fallback to number if word unknown
+                  const minuteLabel = minutesTo === 1 ? lang.minute : lang.minutes;
+                  const labelToAdd = minutesTo !== 15 ? ' ' + minuteLabel : ''; // Don't add "minutes" for quarter
+                  return `${minuteWord}${labelToAdd} ${lang.to} ${lang.numbers[nextHour]}`.replace('  ',' ');
+              } else { // Minutes Past (1-29, excluding 15)
+                  const minuteWord = lang.minuteNumbers[m] || m; // Fallback to number
+                  const minuteLabel = m === 1 ? lang.minute : lang.minutes;
+                  const labelToAdd = (m !== 15 && m !== 30) ? ' ' + minuteLabel : ''; // Don't add "minutes" for quarter/half
+                  return `${minuteWord}${labelToAdd} ${lang.past} ${lang.numbers[hour12]}`.replace('  ',' ');
+              }
+        }
+
+
+        // --- UI Update Functions ---
+
+        /** Sets placeholders for input fields. */
+        function updatePlaceholders() {
+               minuteWordInput.placeholder = _('wordMinutePlaceholder');
+               hourWordInput.placeholder = _('wordHourPlaceholder');
+               fullWordInput.placeholder = _('fullWordPlaceholder');
+               hourDigitalInput.placeholder = ''; // Number inputs don't usually need placeholders here
+               minuteDigitalInput.placeholder = '';
+        }
+
+        /** Sets up the UI for a new round based on the given format and target time. */
+        function setupRoundUI() {
+            // 1. Reset common UI elements
+            if (currentTimeoutId) { clearTimeout(currentTimeoutId); currentTimeoutId = null; }
+            if (currentAnimationTimeout) { clearTimeout(currentAnimationTimeout); currentAnimationTimeout = null; }
+            feedbackOverlay.classList.remove(FEEDBACK_SPREAD_CLASS, FEEDBACK_CORRECT_BG_CLASS, FEEDBACK_INCORRECT_BG_CLASS);
+            feedbackOverlay.style.opacity = 0;
+            feedbackArea.innerHTML = '';
+            feedbackArea.className = 'feedback'; // Reset feedback text classes
+            promptDisplayArea.classList.remove(SECTION_VISIBLE_CLASS); // Use correct constant
+            promptText.textContent = '';
+            promptAmPmIndicator.textContent = '';
+            wordInputSection.classList.remove(SECTION_VISIBLE_CLASS); // Use correct constant
+            standardWordInputContainer.classList.remove(SECTION_VISIBLE_CLASS); // Use correct constant
+            fullWordInputContainer.classList.remove(SECTION_VISIBLE_CLASS); // Use correct constant
+            digitalInputSection.classList.remove(SECTION_VISIBLE_CLASS); // Use correct constant
+            spellingHelperIcon.style.display = 'none';
+            reintroducedIndicator.style.display = 'none';
+            if (correctHourHand) correctHourHand.style.display = 'none';
+            if (correctMinuteHand) correctMinuteHand.style.display = 'none';
+            handsAreDraggable = false;
+            clockContainer.classList.remove(CLOCK_INTERACTIVE_CLASS);
+            if(hourHitArea) hourHitArea.classList.remove(ACTIVE_CLASS);
+            if(minuteHitArea) minuteHitArea.classList.remove(ACTIVE_CLASS);
+
+            // 2. Reset inputs and buttons
+            minuteWordInput.value = ''; hourWordInput.value = ''; fullWordInput.value = '';
+            hourDigitalInput.value = ''; minuteDigitalInput.value = '';
+            hourDigitalInput.disabled = false; minuteDigitalInput.disabled = false;
+            minuteWordInput.disabled = false; hourWordInput.disabled = false; fullWordInput.disabled = false;
+            pastBtn.disabled = false; toBtn.disabled = false;
+            selectedPastTo = 'past'; // Default to 'past'
+            pastBtn.classList.add(ACTIVE_CLASS); toBtn.classList.remove(ACTIVE_CLASS);
+            nextButton.style.display = 'none';
+            checkButton.style.display = 'inline-block';
+            checkButton.disabled = false;
+
+            // 3. Determine UI based on the format the user is GIVEN
+            let instructionKey = '';
+            // Determine format randomly (already done in newRound, but could be done here too)
+            // const formats = ['clock', 'digital', 'words'];
+            // givenFormat = formats[Math.floor(Math.random() * formats.length)];
+
+            switch (givenFormat) {
+                case 'clock': // User sees clock, needs to input digital & words
+                    instructionKey = 'instructionGivenClock';
+                    updateClockUI(targetHour, targetMinute);
+                    updateAmPmIndicator(targetHour, targetMinute);
+                    digitalInputSection.classList.add(SECTION_VISIBLE_CLASS); // Use correct constant
+                    wordInputSection.classList.add(SECTION_VISIBLE_CLASS); // Use correct constant
+                    spellingHelperIcon.style.display = 'block';
+                    if (targetMinute === 0) { fullWordInputContainer.classList.add(SECTION_VISIBLE_CLASS); } // Use correct constant
+                    else { standardWordInputContainer.classList.add(SECTION_VISIBLE_CLASS); } // Use correct constant
+                    break;
+                case 'digital': // User sees digital, needs to set clock & input words
+                    instructionKey = 'instructionGivenDigital';
+                    promptText.textContent = `${formatTwoDigits(targetHour)}:${formatTwoDigits(targetMinute)}`;
+                    promptAmPmIndicator.textContent = ''; // 24h format needs no AM/PM hint
+                    promptDisplayArea.classList.add(SECTION_VISIBLE_CLASS); // Use correct constant
+                    setHandAngles(0, 0); // Reset clock hands for user to set
+                    updateAmPmIndicator(targetHour, targetMinute); // Show AM/PM below clock
+                    wordInputSection.classList.add(SECTION_VISIBLE_CLASS); // Use correct constant
+                    spellingHelperIcon.style.display = 'block';
+                    if (targetMinute === 0) { fullWordInputContainer.classList.add(SECTION_VISIBLE_CLASS); } // Use correct constant
+                    else { standardWordInputContainer.classList.add(SECTION_VISIBLE_CLASS); } // Use correct constant
+                    handsAreDraggable = true; // Enable dragging
+                    clockContainer.classList.add(CLOCK_INTERACTIVE_CLASS);
+                    if(hourHitArea) hourHitArea.classList.add(ACTIVE_CLASS);
+                    if(minuteHitArea) minuteHitArea.classList.add(ACTIVE_CLASS);
+                    break;
+                case 'words': // User sees words, needs to set clock & input digital
+                    instructionKey = 'instructionGivenWords';
+                    promptText.textContent = timeToWords(targetHour, targetMinute);
+                    // Add AM/PM hint for word prompts
+                    if (targetHour === 0 && targetMinute === 0) { promptAmPmIndicator.textContent = `(${translations.de.midnight || 'Midnight'})`; }
+                    else { const isAm = targetHour < 12; promptAmPmIndicator.textContent = `(${_(isAm ? 'am' : 'pm')})`; }
+                    promptDisplayArea.classList.add(SECTION_VISIBLE_CLASS); // Use correct constant
+                    setHandAngles(0, 0); // Reset clock hands for user to set
+                    updateAmPmIndicator(targetHour, targetMinute); // Show AM/PM below clock
+                    digitalInputSection.classList.add(SECTION_VISIBLE_CLASS); // Use correct constant
+                    handsAreDraggable = true; // Enable dragging
+                    clockContainer.classList.add(CLOCK_INTERACTIVE_CLASS);
+                    if(hourHitArea) hourHitArea.classList.add(ACTIVE_CLASS);
+                    if(minuteHitArea) minuteHitArea.classList.add(ACTIVE_CLASS);
+                    break;
+            }
+
+            // 4. Set instructions and placeholders
+            instructionArea.textContent = _(instructionKey);
+            instructionAreaGerman.textContent = translations.de[instructionKey] || ''; // Fallback
+            if (isReintroducedExercise) { reintroducedIndicator.style.display = 'block'; }
+            updatePlaceholders();
+        }
+
+
+        /** Sets the visual rotation of the clock hands and their hit areas. */
+        function setHandAngles(hourAngle, minuteAngle) {
+                currentHourAngle = hourAngle % 360;
+                currentMinuteAngle = minuteAngle % 360;
+                if (hourHand) hourHand.style.transform = `translateX(-50%) rotate(${currentHourAngle}deg)`;
+                if (minuteHand) minuteHand.style.transform = `translateX(-50%) rotate(${currentMinuteAngle}deg)`;
+                if (hourHitArea) hourHitArea.style.transform = `translateX(-50%) rotate(${currentHourAngle}deg)`;
+                if (minuteHitArea) minuteHitArea.style.transform = `translateX(-50%) rotate(${currentMinuteAngle}deg)`;
+        }
+        /** Sets the visual rotation of the green correction hands. */
+        function setCorrectHandAngles(hourAngle, minuteAngle) {
+             if (correctHourHand) correctHourHand.style.transform = `translateX(-50%) rotate(${hourAngle % 360}deg)`;
+             if (correctMinuteHand) correctMinuteHand.style.transform = `translateX(-50%) rotate(${minuteAngle % 360}deg)`;
+        }
+        /** Updates the clock display (hands) to show a specific time. */
+        function updateClockUI(h, m) {
+                 const minuteAngle = m * 6; // 360/60 = 6 degrees per minute
+                 const hourAngle = (h % 12 + m / 60) * 30; // 360/12 = 30 deg/hr + fraction for minutes
+                 setHandAngles(hourAngle, minuteAngle);
+        }
+
+        /** Updates the AM/PM indicator below the clock. */
+        function updateAmPmIndicator(hour, minute) {
+            let abbrText = ''; let descText = '';
+            if (hour === 0 && minute === 0) { // Midnight case
+                abbrText = ''; descText = translations.de.midnight ? `(${translations.de.midnight})` : '(Midnight)';
+            } else {
+                const isAm = hour < 12;
+                abbrText = `(${_(isAm ? 'am' : 'pm')})`;
+                descText = _(isAm ? 'amDesc' : 'pmDesc');
+            }
+            if (amPmAbbr) amPmAbbr.textContent = abbrText;
+            if (amPmDesc) amPmDesc.textContent = descText;
+        }
+
+        /** Updates the score and percentage display with animation. */
+        function updateScore() {
+            if (!scoreValueElement || !scorePercentElement) return;
+            scoreValueElement.textContent = score;
+            const percent = (totalPossibleScore > 0) ? Math.round((score / totalPossibleScore) * 100) : 0;
+
+            if (questionsAnswered > 0) {
+                scorePercentElement.textContent = `(${percent}%)`;
+                let colorClass = SCORE_RED_CLASS; // Default red
+                if (percent === 100) colorClass = SCORE_PERFECT_CLASS;
+                else if (percent >= SCORE_GREEN_THRESHOLD) colorClass = SCORE_GREEN_CLASS;
+                else if (percent >= SCORE_YELLOW_THRESHOLD) colorClass = SCORE_YELLOW_CLASS;
+
+                scorePercentElement.className = 'ml-2 font-semibold'; // Reset classes
+                scorePercentElement.classList.add(colorClass);
+                scorePercentElement.classList.remove('hidden');
+
+                if (percent === 100) { scorePercentElement.classList.add(PERFECT_SCORE_CLASS); }
+                else { scorePercentElement.classList.remove(PERFECT_SCORE_CLASS); }
+            } else {
+                scorePercentElement.textContent = '';
+                scorePercentElement.classList.add('hidden');
+                scorePercentElement.className = 'ml-2 font-semibold hidden';
+            }
+
+            // Animate score update
+            scoreValueElement.classList.add(SCORE_UPDATED_CLASS);
+            if (scoreUpdateTimeout) clearTimeout(scoreUpdateTimeout);
+            scoreUpdateTimeout = setTimeout(() => {
+                if (scoreValueElement) scoreValueElement.classList.remove(SCORE_UPDATED_CLASS);
+                scoreUpdateTimeout = null;
+            }, SCORE_POP_DURATION);
+        }
+
+
+        /** Displays feedback messages, triggers overlay animation, and shows correct answers if needed. */
+        function showFeedback(results) {
+            let feedbackMessages = [];
+            let allCorrect = true;
+            let anyCorrect = false;
+            let correctionHTML = '';
+            let numCorrectThisRound = 0; // Recalculate for clarity
+
+             // 1. Build feedback messages array
+             if (results.clock !== undefined) { const status = results.clock.correct ? _('feedbackCorrect') : _('feedbackIncorrect'); feedbackMessages.push(`${_('feedbackClock')}: ${status}`); if (!results.clock.correct) allCorrect = false; else { anyCorrect = true; numCorrectThisRound++; } }
+             if (results.digital !== undefined) { const status = results.digital.correct ? _('feedbackCorrect') : _('feedbackIncorrect'); feedbackMessages.push(`${_('feedbackDigital')}: ${status}`); if (!results.digital.correct) allCorrect = false; else { anyCorrect = true; numCorrectThisRound++; } }
+             if (results.words !== undefined) { const status = results.words.correct ? _('feedbackCorrect') : _('feedbackIncorrect'); feedbackMessages.push(`${_('feedbackWords')}: ${status}`); if (!results.words.correct) allCorrect = false; else { anyCorrect = true; numCorrectThisRound++; } }
+
+            // 2. Display combined feedback message
+            feedbackArea.innerHTML = feedbackMessages.join(_('feedbackSeparator'));
+
+            // 3. Trigger feedback overlay animation
+            const overlayBgClass = allCorrect ? FEEDBACK_CORRECT_BG_CLASS : FEEDBACK_INCORRECT_BG_CLASS;
+            const containerRect = gameContainer.getBoundingClientRect();
+            const buttonRect = checkButton.getBoundingClientRect(); // Animate from check button
+            const clickXRel = (buttonRect.left - containerRect.left) + buttonRect.width / 2;
+            const clickYRel = (buttonRect.top - containerRect.top) + buttonRect.height / 2;
+            const clickXPercent = (clickXRel / containerRect.width) * 100;
+            const clickYPercent = (clickYRel / containerRect.height) * 100;
+
+            feedbackOverlay.classList.remove(FEEDBACK_SPREAD_CLASS, FEEDBACK_CORRECT_BG_CLASS, FEEDBACK_INCORRECT_BG_CLASS); // Reset
+            feedbackOverlay.style.setProperty('--click-x', `${clickXPercent}%`);
+            feedbackOverlay.style.setProperty('--click-y', `${clickYPercent}%`);
+            feedbackOverlay.classList.add(overlayBgClass);
+            void feedbackOverlay.offsetWidth; // Force reflow to restart animation
+            feedbackOverlay.classList.add(FEEDBACK_SPREAD_CLASS);
+
+            // Clear animation class after it finishes
+            if (currentAnimationTimeout) clearTimeout(currentAnimationTimeout);
+            currentAnimationTimeout = setTimeout(() => {
+                feedbackOverlay.classList.remove(FEEDBACK_SPREAD_CLASS, FEEDBACK_CORRECT_BG_CLASS, FEEDBACK_INCORRECT_BG_CLASS);
+                feedbackOverlay.style.opacity = 0;
+                currentAnimationTimeout = null;
+            }, FEEDBACK_ANIMATION_DURATION);
+
+            // 4. Set feedback text color and show corrections if needed
+            if (allCorrect) {
+                feedbackArea.className = `feedback ${FEEDBACK_TEXT_CORRECT_CLASS}`;
+                if (correctHourHand) correctHourHand.style.display = 'none';
+                if (correctMinuteHand) correctMinuteHand.style.display = 'none';
+            } else {
+                feedbackArea.className = `feedback ${anyCorrect ? FEEDBACK_TEXT_PARTIAL_CLASS : FEEDBACK_TEXT_INCORRECT_CLASS}`;
+                correctionHTML += `<span class="correct-answer-feedback"><strong>${_('correctAnswerIs')}</strong> `;
+                let corrections = [];
+                // Show clock correction
+                if (results.clock !== undefined && !results.clock.correct) {
+                    corrections.push(`${_('feedbackClock')}: ${formatTwoDigits(targetHour)}:${formatTwoDigits(targetMinute)}`);
+                    const targetMinuteAngle = (targetMinute * 6);
+                    const targetHourAngle = ((targetHour % 12 + targetMinute / 60) * 30);
+                    setCorrectHandAngles(targetHourAngle, targetMinuteAngle);
+                    if (correctHourHand) correctHourHand.style.display = 'block';
+                    if (correctMinuteHand) correctMinuteHand.style.display = 'block';
+                } else { // Hide correction hands if clock part was correct
+                     if (correctHourHand) correctHourHand.style.display = 'none';
+                     if (correctMinuteHand) correctMinuteHand.style.display = 'none';
+                }
+                // Show digital correction
+                if (results.digital !== undefined && !results.digital.correct) {
+                    corrections.push(`${_('feedbackDigital')}: ${results.digital.targetString}`);
+                }
+                // Show words correction
+                if (results.words !== undefined && !results.words.correct) {
+                    corrections.push(`${_('feedbackWords')}: ${results.words.targetString}`);
+                }
+                correctionHTML += corrections.join(_('feedbackSeparator')) + `</span>`;
+                feedbackArea.innerHTML += correctionHTML; // Append correction info
+            }
+
+            // 5. Disable inputs and toggle buttons
+            hourDigitalInput.disabled = true; minuteDigitalInput.disabled = true;
+            minuteWordInput.disabled = true; hourWordInput.disabled = true; fullWordInput.disabled = true;
+            pastBtn.disabled = true; toBtn.disabled = true;
+            checkButton.style.display = 'none'; checkButton.disabled = true;
+            nextButton.style.display = 'inline-block';
+        }
+
+
+        // --- Clock Drawing (SVG Version) ---
+        /** Draws the static clock face markings and numbers using SVG. */
+        function drawClockMarkingsSVG() {
+            clockSvg.innerHTML = ''; // Clear previous markings
+            const cx = 100; const cy = 100; // Center coordinates in SVG viewbox
+            const faceRadius = 95;
+            const numRadius = faceRadius * 0.77; // Radius for placing numbers
+            const hourMarkStartRadius = faceRadius * 0.9; // Inner radius for hour ticks
+            const minuteMarkStartRadius = faceRadius * 0.95; // Inner radius for minute ticks
+
+            try {
+                // Draw minute marks (small ticks)
+                for (let m = 0; m < 60; m++) {
+                    if (m % 5 === 0) continue; // Skip marks at hour positions
+                    const angleRad = (m * 6 - 90) * (Math.PI / 180); // Angle in radians, offset by -90deg
+                    const x1 = cx + minuteMarkStartRadius * Math.cos(angleRad);
+                    const y1 = cy + minuteMarkStartRadius * Math.sin(angleRad);
+                    const x2 = cx + faceRadius * Math.cos(angleRad);
+                    const y2 = cy + faceRadius * Math.sin(angleRad);
+                    const mark = document.createElementNS(SVG_NS, 'line');
+                    mark.setAttribute('x1', x1); mark.setAttribute('y1', y1);
+                    mark.setAttribute('x2', x2); mark.setAttribute('y2', y2);
+                    mark.setAttribute('class', 'clock-mark minute-mark');
+                    clockSvg.appendChild(mark);
+                }
+
+                // Draw hour marks (longer ticks) and numbers
+                for (let h = 1; h <= 12; h++) {
+                    const angleDegrees = h * 30; // 30 degrees per hour
+                    const angleRad = (angleDegrees - 90) * (Math.PI / 180); // Offset by -90deg
+
+                    // Hour tick mark
+                    const markX1 = cx + hourMarkStartRadius * Math.cos(angleRad);
+                    const markY1 = cy + hourMarkStartRadius * Math.sin(angleRad);
+                    const markX2 = cx + faceRadius * Math.cos(angleRad);
+                    const markY2 = cy + faceRadius * Math.sin(angleRad);
+                    const mark = document.createElementNS(SVG_NS, 'line');
+                    mark.setAttribute('x1', markX1); mark.setAttribute('y1', markY1);
+                    mark.setAttribute('x2', markX2); mark.setAttribute('y2', markY2);
+                    mark.setAttribute('class', 'clock-mark hour-mark');
+                    clockSvg.appendChild(mark);
+
+                    // Hour number
+                    const numX = cx + numRadius * Math.cos(angleRad);
+                    const numY = cy + numRadius * Math.sin(angleRad);
+                    const numberText = document.createElementNS(SVG_NS, 'text');
+                    numberText.setAttribute('x', numX);
+                    numberText.setAttribute('y', numY);
+                    numberText.setAttribute('class', 'hour-number');
+                    numberText.textContent = h;
+                    clockSvg.appendChild(numberText);
+                }
+            } catch (error) {
+                console.error("Error drawing SVG clock face:", error);
+            }
+        }
+
+        // --- Dragging Logic ---
+        /** Calculates the angle (0-360) from the clock center to the event position. */
+        function getAngleFromEvent(event) {
+               const rect = clockContainer.getBoundingClientRect();
+               const clientX = event.changedTouches ? event.changedTouches[0].clientX : event.clientX;
+               const clientY = event.changedTouches ? event.changedTouches[0].clientY : event.clientY;
+               const centerX = rect.left + rect.width / 2;
+               const centerY = rect.top + rect.height / 2;
+               const deltaX = clientX - centerX;
+               const deltaY = clientY - centerY;
+               let angle = Math.atan2(deltaX, -deltaY) * (180 / Math.PI); // Angle from vertical up
+               return (angle + 360) % 360; // Normalize to 0-360
+        }
+        /** Starts dragging a clock hand. */
+        function startDrag(event) {
+            if (!handsAreDraggable || draggingHand) return;
+            event.preventDefault(); event.stopPropagation();
+            if (event.target === hourHitArea) { draggingHand = 'hour'; }
+            else if (event.target === minuteHitArea) { draggingHand = 'minute'; }
+            else { return; }
+            // Add listeners to window for move/end to catch events outside the hit area
+            window.addEventListener('mousemove', dragMove);
+            window.addEventListener('mouseup', endDrag);
+            window.addEventListener('touchmove', dragMove, { passive: false });
+            window.addEventListener('touchend', endDrag);
+        }
+        /** Updates hand angles during drag. */
+        function dragMove(event) {
+            if (!draggingHand || !handsAreDraggable) return;
+            event.preventDefault(); // Prevent scroll on touch
+            const angle = getAngleFromEvent(event);
+            let newHourAngle = currentHourAngle;
+            let newMinuteAngle = currentMinuteAngle;
+
+            if (draggingHand === 'minute') {
+                newMinuteAngle = Math.round(angle / 6) * 6; // Snap to nearest minute
+                // Update hour hand based on minute movement
+                const currentHourValue = Math.floor(currentHourAngle / 30); // Approx current hour
+                const newMinutesValue = (newMinuteAngle / 6) % 60;
+                newHourAngle = ((currentHourValue % 12) + newMinutesValue / 60) * 30;
+            } else { // dragging hour hand
+                 // Snap hour hand loosely (e.g., nearest 15 mins = 7.5 deg) for easier control
+                 newHourAngle = Math.round(angle / 7.5) * 7.5;
+                 // Optional: Could update minute hand based on hour, but less intuitive
+            }
+            setHandAngles(newHourAngle, newMinuteAngle);
+        }
+        /** Ends the dragging operation. */
+        function endDrag(event) {
+            if (!draggingHand) return;
+            draggingHand = null;
+            // Remove window listeners
+            window.removeEventListener('mousemove', dragMove);
+            window.removeEventListener('mouseup', endDrag);
+            window.removeEventListener('touchmove', dragMove);
+            window.removeEventListener('touchend', endDrag);
+        }
+
+        // --- Spelling Helper Logic ---
+        /** Opens the spelling helper overlay. */
+        function openSpellingHelper() {
+            populateSpellingHelper(); // Populate with current difficulty words
+            spellingOverlay.classList.add(VISIBLE_CLASS); // Use the corrected constant
+        }
+        /** Closes the spelling helper overlay. */
+        function closeSpellingHelper() {
+            spellingOverlay.classList.remove(VISIBLE_CLASS); // Use the corrected constant
+        }
+
+        // --- Game Logic ---
+
+        /** Starts a new round: determines question, sets up UI. */
+        function newRound() {
+            answerSubmitted = false;
+            isReintroducedExercise = false;
+            const currentTurn = questionsAnswered;
+            let exercise = null;
+            let reintroduceIndex = -1;
+
+            // 1. Check for exercises to reintroduce from the queue
+            reintroduceIndex = incorrectExercisesQueue.findIndex(item => item.reintroduceAfterTurn <= currentTurn);
+
+            if (reintroduceIndex !== -1) {
+                exercise = incorrectExercisesQueue.splice(reintroduceIndex, 1)[0]; // Get and remove from queue
+            } else {
+                // 2. If queue is full, take the oldest incorrect exercise (FIFO)
+                if (incorrectExercisesQueue.length >= MAX_INCORRECT_QUEUE) {
+                    exercise = incorrectExercisesQueue.shift();
+                } else {
+                    // 3. Otherwise, generate a brand new time
+                    generateTime(); // Uses difficulty-aware function
+                }
+            }
+
+            // 4. If an exercise was retrieved from the queue, use its details
+            if (exercise) {
+                targetHour = exercise.hour;
+                targetMinute = exercise.minute;
+                // Use the original format if stored, otherwise pick random
+                givenFormat = exercise.format || ['clock', 'digital', 'words'][Math.floor(Math.random() * 3)];
+                isReintroducedExercise = true;
+            } else {
+                // 5. If a new time was generated, pick a random format
+                 const formats = ['clock', 'digital', 'words'];
+                 givenFormat = formats[Math.floor(Math.random() * formats.length)];
+            }
+
+            // 6. Set up the UI for the round
+            setupRoundUI();
+        }
+
+
+        /** Checks the user's answers against the target time. */
+        function checkAnswer() {
+            if (answerSubmitted) return;
+
+            let results = { clock: undefined, digital: undefined, words: undefined }; // Initialize results object
+            let checkClock = false, checkDigital = false, checkWords = false;
+            let numCorrectThisRound = 0;
+            const numRequiredParts = 2; // Always require 2 parts
+
+            // Determine which parts need checking
+            switch (givenFormat) {
+                case 'clock': checkDigital = true; checkWords = true; break;
+                case 'digital': checkClock = true; checkWords = true; break;
+                case 'words': checkClock = true; checkDigital = true; break;
+            }
+
+            // --- Check Clock Hands ---
+            if (checkClock) {
+                const targetMinuteAngle = (targetMinute * 6) % 360;
+                const minuteDiff = Math.min(Math.abs(currentMinuteAngle - targetMinuteAngle), 360 - Math.abs(currentMinuteAngle - targetMinuteAngle));
+                const minuteCorrect = minuteDiff < MINUTE_HAND_ANGLE_TOLERANCE;
+
+                // Hour Hand Segment Check
+                let hourCorrect = false;
+                const targetHour12 = targetHour % 12;
+                const startAngle = targetHour12 * 30;
+                const endAngle = (startAngle + 30) % 360;
+                hourCorrect = isAngleBetween(currentHourAngle, startAngle, endAngle);
+
+                results.clock = {
+                    correct: (minuteCorrect && hourCorrect),
+                    targetString: `${formatTwoDigits(targetHour)}:${formatTwoDigits(targetMinute)}`
+                };
+                if (results.clock.correct) numCorrectThisRound++;
+            }
+
+            // --- Check Digital Input ---
+            if (checkDigital) {
+                const inputHourStr = hourDigitalInput.value;
+                const inputMinuteStr = minuteDigitalInput.value;
+                const inputHour = parseInt(inputHourStr);
+                const inputMinute = parseInt(inputMinuteStr);
+                const targetHourStr = formatTwoDigits(targetHour);
+                const targetMinuteStr = formatTwoDigits(targetMinute);
+                let isCorrect = false;
+                if (targetHour === 0 && targetMinute === 0) { isCorrect = (!isNaN(inputHour) && !isNaN(inputMinute) && (inputHour === 0 || inputHour === 24) && inputMinute === 0); }
+                else { isCorrect = (!isNaN(inputHour) && !isNaN(inputMinute) && inputHour === targetHour && inputMinute === targetMinute); }
+                results.digital = { correct: isCorrect, userInput: `${inputHourStr}:${inputMinuteStr}`, targetString: `${targetHourStr}:${targetMinuteStr}` };
+                if (results.digital.correct) numCorrectThisRound++;
+            }
+
+            // --- Check Word Input ---
+            if (checkWords) {
+                let userInputRaw = '', inputTimeWords = '';
+                const expectedTime = timeToWords(targetHour, targetMinute);
+                const expectedTimeWords = expectedTime.toLowerCase().trim();
+
+                if (targetMinute === 0) { // O'clock case
+                    userInputRaw = fullWordInput.value.trim();
+                    inputTimeWords = userInputRaw.toLowerCase();
+                    const normalizedInput = normalizeOclock(inputTimeWords);
+                    const normalizedExpected = normalizeOclock(expectedTimeWords);
+                    results.words = { correct: (normalizedInput === normalizedExpected), userInput: userInputRaw, targetString: expectedTime };
+                } else { // Past/To case
+                    const minuteWord = minuteWordInput.value.trim().toLowerCase();
+                    const pastTo = selectedPastTo;
+                    const hourWord = hourWordInput.value.trim().toLowerCase();
+                    const activePastToButton = pastBtn.classList.contains(ACTIVE_CLASS) ? pastBtn : toBtn;
+                    userInputRaw = `${minuteWord} ${activePastToButton.textContent} ${hourWord}`;
+
+                    const minuteNumVal = langMinuteLookup(minuteWord);
+                    const hourNumVal = langNumLookup(hourWord);
+                    if (minuteNumVal !== null && hourNumVal !== null) {
+                        const minuteLabel = minuteNumVal === 1 ? _('minute') : _('minutes');
+                        const labelToAdd = (minuteNumVal !== 15 && minuteNumVal !== 30) ? ` ${minuteLabel}` : '';
+                        inputTimeWords = `${minuteWord}${labelToAdd} ${pastTo} ${hourWord}`.replace('  ',' ');
+                    } else { inputTimeWords = userInputRaw; } // Use raw if lookup failed
+
+                    const normalizedInput = normalizeCompoundNumbers(inputTimeWords.replace(/\s+/g, ' ').trim());
+                    const normalizedExpected = normalizeCompoundNumbers(expectedTimeWords.replace(/\s+/g, ' ').trim());
+                    results.words = { correct: (normalizedInput === normalizedExpected), userInput: userInputRaw, targetString: expectedTime };
+                }
+                if (results.words.correct) numCorrectThisRound++;
+            }
+
+            // --- Process Results ---
+            answerSubmitted = true;
+            const fullyCorrect = (numCorrectThisRound === numRequiredParts);
+            questionsAnswered++;
+            score += numCorrectThisRound;
+            totalPossibleScore += numRequiredParts;
+
+            // Add to incorrect queue if needed
+            if (!fullyCorrect) {
+                 const isDuplicate = incorrectExercisesQueue.some(item => item.hour === targetHour && item.minute === targetMinute );
+                 if (!isDuplicate) {
+                     if (incorrectExercisesQueue.length >= MAX_INCORRECT_QUEUE) { incorrectExercisesQueue.shift(); }
+                     const reintroduceTurn = questionsAnswered + Math.floor(Math.random() * 2) + 3; // Reintroduce 3-4 turns later
+                     incorrectExercisesQueue.push({ hour: targetHour, minute: targetMinute, format: givenFormat, reintroduceAfterTurn: reintroduceTurn });
+                 }
+             }
+
+            updateScore();
+            showFeedback(results);
+        }
+
+        /** Looks up the number corresponding to an English hour/number word. */
+        function langNumLookup(word) {
+            const numKey = Object.keys(translations.en.numbers).find(key => translations.en.numbers[key] === word);
+            return numKey ? parseInt(numKey) : null;
+        }
+        /** Looks up the number corresponding to an English minute word. */
+        function langMinuteLookup(word) {
+            const numKey = Object.keys(translations.en.minuteNumbers).find(key => translations.en.minuteNumbers[key] === word);
+            return numKey ? parseInt(numKey) : null;
+        }
+
+        // --- Difficulty Change Logic ---
+
+        /** Handles request to change difficulty, showing confirmation if needed. */
+        function requestDifficultyChange(newDifficulty) {
+            if (newDifficulty === currentDifficulty) return; // No change
+            if (questionsAnswered > 0) { // Check if game has started
+                pendingDifficultyChange = newDifficulty;
+                confirmationOverlay.classList.add(VISIBLE_CLASS); // Use correct constant
+            } else {
+                setDifficulty(newDifficulty); // Change immediately if no progress
+            }
+        }
+
+        /** Sets the new difficulty, resets game state, and starts a new round. */
+        function setDifficulty(newDifficulty) {
+            currentDifficulty = newDifficulty;
+            pendingDifficultyChange = null; // Clear pending state
+
+            updateDifficultyUI(); // Update buttons and title
+
+            // Reset game state
+            score = 0;
+            questionsAnswered = 0;
+            totalPossibleScore = 0;
+            incorrectExercisesQueue = [];
+            elapsedTime = 0; // Reset timer
+            if (timerValueElement) timerValueElement.textContent = formatTime(elapsedTime);
+
+            // Adjust minute input step for Medium difficulty
+            if (currentDifficulty === 'medium') {
+                minuteDigitalInput.setAttribute('step', '5');
+            } else {
+                minuteDigitalInput.removeAttribute('step');
+            }
+
+            newRound(); // Start new round with new settings
+            updateScore(); // Update score display (to 0)
+        }
+
+        /** Updates the difficulty selector buttons and page title. */
+        function updateDifficultyUI() {
+            // Update button active states
+            difficultyButtons.forEach(btn => {
+                const difficulty = btn.getAttribute('data-difficulty');
+                if (difficulty === currentDifficulty) {
+                    btn.classList.add(ACTIVE_CLASS, difficulty); // Add 'active' and specific e.g. 'easy' class
+                } else {
+                    // Remove 'active' and all potential difficulty classes
+                    btn.classList.remove(ACTIVE_CLASS, ...DIFFICULTY_CLASSES);
+                }
+            });
+
+            // Update page title
+            let titleText = '';
+            if (currentDifficulty === 'easy') titleText = _('difficultyEasy');
+            else if (currentDifficulty === 'medium') titleText = _('difficultyMedium');
+            else titleText = _('difficultyDifficult');
+            document.title = `${_('appTitle')} (${titleText})`;
+        }
+
+        // --- Initialization ---
+
+        /** Attaches all necessary event listeners. */
+        function attachEventListeners() {
+             // Main buttons
+             nextButton.addEventListener('click', () => { newRound(); });
+             checkButton.addEventListener('click', checkAnswer);
+
+             // Enter key submission in input fields
+             digitalInputSection.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !checkButton.disabled) { checkAnswer(); } });
+             wordInputSection.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !checkButton.disabled) { checkAnswer(); } });
+
+             // Clock hand dragging
+             if (hourHitArea && minuteHitArea) {
+                 hourHitArea.addEventListener('mousedown', startDrag);
+                 minuteHitArea.addEventListener('mousedown', startDrag);
+                 hourHitArea.addEventListener('touchstart', startDrag, { passive: false });
+                 minuteHitArea.addEventListener('touchstart', startDrag, { passive: false });
+             } else { console.error("Could not find hit area elements."); }
+
+             // Word input validation (prevent digits)
+             if(minuteWordInput) minuteWordInput.addEventListener('input', preventDigits);
+             if(hourWordInput) hourWordInput.addEventListener('input', preventDigits);
+             if(fullWordInput) fullWordInput.addEventListener('input', preventDigits);
+
+             // Spelling helper controls
+             spellingHelperIcon.addEventListener('click', openSpellingHelper);
+             closeSpellingOverlay.addEventListener('click', closeSpellingHelper);
+             spellingOverlay.addEventListener('click', (event) => { if (event.target === spellingOverlay) { closeSpellingHelper(); } }); // Close on overlay click
+
+             // Past/To toggle buttons
+             pastBtn.addEventListener('click', () => { if (!pastBtn.disabled && selectedPastTo !== 'past') { selectedPastTo = 'past'; pastBtn.classList.add(ACTIVE_CLASS); toBtn.classList.remove(ACTIVE_CLASS); } });
+             toBtn.addEventListener('click', () => { if (!toBtn.disabled && selectedPastTo !== 'to') { selectedPastTo = 'to'; toBtn.classList.add(ACTIVE_CLASS); pastBtn.classList.remove(ACTIVE_CLASS); } });
+
+             // Difficulty selector buttons
+             difficultyButtons.forEach(button => {
+                 button.addEventListener('click', () => {
+                     const newDifficulty = button.getAttribute('data-difficulty');
+                     requestDifficultyChange(newDifficulty);
+                 });
+             });
+
+             // Confirmation dialog buttons
+             confirmChangeBtn.addEventListener('click', () => {
+                 if (pendingDifficultyChange) { setDifficulty(pendingDifficultyChange); }
+                 confirmationOverlay.classList.remove(VISIBLE_CLASS); // Use correct constant
+             });
+             cancelChangeBtn.addEventListener('click', () => {
+                 pendingDifficultyChange = null; // Cancel the change
+                 confirmationOverlay.classList.remove(VISIBLE_CLASS); // Use correct constant
+             });
+        }
+
+        /** Initializes the game on page load. */
+        function init() {
+             // Ensure clock face is drawn after DOM is ready
+             if (document.readyState === 'loading') {
+                 document.addEventListener('DOMContentLoaded', drawClockMarkingsSVG);
+             } else {
+                 setTimeout(drawClockMarkingsSVG, 0); // Already loaded, draw async
+             }
+             setHandAngles(0,0); // Initial hand position
+
+             // Set button text from translations
+             checkButton.textContent = _('checkAnswer');
+             nextButton.textContent = _('nextQuestion');
+             wordInputLabel.textContent = _('wordInputLabel');
+             digitalInputLabel.textContent = _('digitalInputLabel');
+
+             // Attach all event listeners
+             attachEventListeners();
+
+             // Set initial difficulty UI and start first round
+             setDifficulty(currentDifficulty); // Calls newRound() internally
+
+             // Start the session timer
+             elapsedTime = 0;
+             if (timerValueElement) timerValueElement.textContent = formatTime(elapsedTime);
+             if (timerInterval) clearInterval(timerInterval); // Clear any previous interval
+             timerInterval = setInterval(() => {
+                 elapsedTime++;
+                 if (timerValueElement) timerValueElement.textContent = formatTime(elapsedTime);
+             }, 1000); // Update every second
+        }
+
+        // --- Start the Game ---
+        init();
+
+    </script>
+
+</body>
+</html>
